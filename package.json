@@ -19,6 +19,12 @@
     "prepublishOnly": "npm run clean && npm run build"
   },
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/footcarts/unify-mcp.git"
+  },
+  "homepage": "https://github.com/footcarts/unify-mcp",
+  "bugs": "https://github.com/footcarts/unify-mcp/issues",
   "keywords": [
     "mcp",
     "model-context-protocol",
