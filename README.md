@@ -78,7 +78,7 @@ When the session cookie itself expires, you'll see `"Run unify-mcp login"` — r
 | `Auth0: invalid password` | Double-check your password at app.unifygtm.com. If you use SSO, click **Reset Password** there, set one, then `unify-mcp login`. |
 | `Auth0: MFA required, not supported` | This MCP doesn't support MFA-protected Auth0 logins. Ask your Unify admin to disable MFA for your account, or open an issue. |
 | Just changed your Unify password | `unify-mcp logout && unify-mcp login` |
-| `npm install -g` permission errors | Install Node via `brew install node` (which sets up a user-owned npm prefix), or use `npx unify-mcp` in your Claude config: `{ "command": "npx", "args": ["-y", "unify-mcp"] }` |
+| `npm install -g` permission errors | Install Node via `brew install node` (which sets up a user-owned npm prefix), or use `npx unify-mcp` in your Claude config: `{ "command": "npx", "args": ["-y", "--prefer-online", "unify-mcp"] }` |
 
 ## Tool surface
 
@@ -90,6 +90,7 @@ When the session cookie itself expires, you'll see `"Run unify-mcp login"` — r
 - **Plays**: list, get definition, trigger for object ids
 - **Notes**: get current draft, publish a note
 - **Tasks**: create task, get unseen count
+- **Bulk import**: `upload_unify_csv` (people or companies → creates List + records), `preview_unify_csv_upload` (validate column→field mapping before committing). Enrichment off by default.
 - **Schema introspection**: list object types, sample records to discover fields
 - **Workspace**: current user, mailboxes, snippets, folders
 

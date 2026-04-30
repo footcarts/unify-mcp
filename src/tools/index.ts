@@ -44,6 +44,7 @@ import {
 } from "./sequences.js";
 import { createTask, getUnseenTaskCount } from "./tasks.js";
 import { ToolDef } from "./types.js";
+import { previewCsv, uploadCsv } from "./upload.js";
 import {
   getCurrentUser,
   listFolders,
@@ -95,6 +96,9 @@ export const tools: ToolDef[] = [
   // tasks
   createTask,
   getUnseenTaskCount,
+  // bulk csv upload
+  uploadCsv,
+  previewCsv,
   // schema introspection
   listObjectTypes,
   sampleObjectRecords,
