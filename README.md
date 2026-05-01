@@ -2,7 +2,7 @@
 
 Use Claude to query and update your [Unify GTM](https://unifygtm.com) CRM. ~45 tools for people, companies, sequences, audiences, plays, lists, notes, and tasks.
 
-Log in once with your Unify email/password. No API keys, no admin setup. Token cached locally; auto-refreshes silently for ~30 days.
+Log in interactively in Claude — no API keys, no admin setup, no env vars. First time you use a Unify tool, Claude shows a sign-in form right in the chat. Token cached locally and auto-refreshes silently for ~30 days.
 
 ## Try these prompts (after install)
 

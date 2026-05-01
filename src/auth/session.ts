@@ -54,13 +54,22 @@ async function doRefresh(): Promise<string> {
   return doFullLogin();
 }
 
+/**
+ * Sentinel error: caller should prompt the user for credentials (e.g. via
+ * MCP elicitation) and retry by calling `interactiveLogin(email, password)`.
+ */
+export class CredentialsRequired extends Error {
+  constructor() {
+    super("Unify credentials required");
+    this.name = "CredentialsRequired";
+  }
+}
+
 async function doFullLogin(): Promise<string> {
   const user = process.env[ENV_LOGIN_USER];
   const pass = process.env[ENV_LOGIN_PASS];
   if (!user || !pass) {
-    throw new Error(
-      "Unify session expired and no credentials available. Run `unify-mcp login` to re-authenticate."
-    );
+    throw new CredentialsRequired();
   }
   const { accessToken, expiresIn, cookieJar } = await loginWithPassword(user, pass);
   const next: CachedToken = {

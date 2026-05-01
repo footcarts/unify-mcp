@@ -1,6 +1,6 @@
 {
   "name": "unify-mcp",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Use Claude to query and update your Unify GTM CRM — people, companies, sequences, lists, plays, audiences, notes, tasks. Log in with your Unify account. No API keys.",
   "type": "module",
   "bin": {
