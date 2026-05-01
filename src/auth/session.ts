@@ -1,5 +1,6 @@
 import { CookieJar } from "tough-cookie";
 import { ENV_LOGIN_PASS, ENV_LOGIN_USER } from "../config.js";
+import { loadCredentials, saveCredentials } from "./credentials.js";
 import { loginWithPassword, silentReauth } from "./login.js";
 import {
   CachedToken,
@@ -66,8 +67,18 @@ export class CredentialsRequired extends Error {
 }
 
 async function doFullLogin(): Promise<string> {
-  const user = process.env[ENV_LOGIN_USER];
-  const pass = process.env[ENV_LOGIN_PASS];
+  // Priority: env vars → saved credentials file → ask the user
+  const envUser = process.env[ENV_LOGIN_USER];
+  const envPass = process.env[ENV_LOGIN_PASS];
+  let user = envUser;
+  let pass = envPass;
+  if (!user || !pass) {
+    const saved = await loadCredentials();
+    if (saved) {
+      user = saved.email;
+      pass = saved.password;
+    }
+  }
   if (!user || !pass) {
     throw new CredentialsRequired();
   }
@@ -82,7 +93,11 @@ async function doFullLogin(): Promise<string> {
   return accessToken;
 }
 
-/** Used by `unify-mcp login` — always does a full U/P login. */
+/**
+ * Used by `unify-mcp login` and the in-chat elicitation flow. Performs a full
+ * U/P login and persists the credentials so future session expiries can
+ * silently re-auth without prompting the user again.
+ */
 export async function interactiveLogin(
   user: string,
   pass: string
@@ -95,6 +110,7 @@ export async function interactiveLogin(
     cookies: cookieJar.toJSON(),
   };
   await saveToken(next);
+  await saveCredentials({ email: user, password: pass });
   return { email: user, expiresIn };
 }
 

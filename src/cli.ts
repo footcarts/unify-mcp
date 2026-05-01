@@ -2,8 +2,9 @@
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout, stderr } from "node:process";
 import { ENV_LOGIN_PASS, ENV_LOGIN_USER } from "./config.js";
-import { loginWithPassword } from "./auth/login.js";
-import { clearToken, loadToken, saveToken } from "./auth/token-cache.js";
+import { clearCredentials } from "./auth/credentials.js";
+import { interactiveLogin } from "./auth/session.js";
+import { clearToken, loadToken } from "./auth/token-cache.js";
 
 async function main() {
   const cmd = process.argv[2];
@@ -21,14 +22,11 @@ async function doLogin() {
   const pass =
     process.env[ENV_LOGIN_PASS] ?? (await rl.question("Password: "));
   rl.close();
-  const { accessToken, expiresIn } = await loginWithPassword(user, pass);
-  await saveToken({
-    accessToken,
-    expiresAt: Date.now() + expiresIn * 1000,
-    email: user,
-  });
+  const { expiresIn } = await interactiveLogin(user, pass);
   stdout.write(`✓ Logged in as ${user}\n`);
-  stdout.write(`  Token TTL: ${expiresIn}s. Auto-refresh enabled.\n`);
+  stdout.write(
+    `  Token TTL: ${expiresIn}s. Credentials cached for silent re-auth.\n`
+  );
 }
 
 async function doWhoami() {
@@ -46,7 +44,8 @@ async function doWhoami() {
 
 async function doLogout() {
   await clearToken();
-  stdout.write("✓ Logged out\n");
+  await clearCredentials();
+  stdout.write("✓ Logged out (token + credentials cleared)\n");
 }
 
 main().catch((err) => {

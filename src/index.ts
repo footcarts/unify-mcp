@@ -9,7 +9,7 @@ import { CredentialsRequired, interactiveLogin } from "./auth/session.js";
 import { findTool, tools } from "./tools/index.js";
 
 const server = new Server(
-  { name: "unify-mcp", version: "0.3.0" },
+  { name: "unify-mcp", version: "0.3.1" },
   { capabilities: { tools: {} } }
 );
 
