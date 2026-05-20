@@ -1,6 +1,6 @@
 {
   "name": "unify-mcp",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "Use Claude to query and update your Unify GTM CRM — people, companies, sequences, lists, plays, audiences, notes, tasks. Log in with your Unify account. No API keys.",
   "type": "module",
   "bin": {
@@ -41,10 +41,12 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
     "axios": "^1.7.0",
+    "express": "^5.2.1",
     "tough-cookie": "^4.1.4",
     "zod": "^4.0.0"
   },
   "devDependencies": {
+    "@types/express": "^5.0.6",
     "@types/node": "^20.0.0",
     "@types/tough-cookie": "^4.0.5",
     "tsx": "^4.0.0",

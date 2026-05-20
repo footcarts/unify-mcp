@@ -5,11 +5,12 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import { CredentialsRequired, interactiveLogin } from "./auth/session.js";
+import { browserLogin } from "./auth/browser-login.js";
+import { CredentialsRequired } from "./auth/session.js";
 import { findTool, tools } from "./tools/index.js";
 
 const server = new Server(
-  { name: "unify-mcp", version: "0.3.1" },
+  { name: "unify-mcp", version: "0.4.0" },
   { capabilities: { tools: {} } }
 );
 
@@ -26,46 +27,32 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
   })),
 }));
 
-const elicitResultSchema = z.object({
-  action: z.enum(["accept", "decline", "cancel"]),
-  content: z
-    .object({ email: z.string(), password: z.string() })
-    .optional(),
-});
-
-async function promptForCredentials(): Promise<boolean> {
+async function promptForCredentials(): Promise<{ ok: boolean; message?: string }> {
+  // Spin up a local HTTP server bound to 127.0.0.1, open the user's default
+  // browser to a sign-in form, wait for them to submit. No client-elicitation
+  // needed — works on every MCP client.
+  let openedUrl: string | undefined;
   try {
-    const res = await server.request(
-      {
-        method: "elicitation/create",
-        params: {
-          message:
-            "Sign in to Unify to use this tool. Don't have a password? Reset it at https://app.unifygtm.com.",
-          requestedSchema: {
-            type: "object",
-            properties: {
-              email: {
-                type: "string",
-                title: "Unify email",
-                format: "email",
-              },
-              password: {
-                type: "string",
-                title: "Unify password",
-                format: "password",
-              },
-            },
-            required: ["email", "password"],
-          },
-        },
+    await browserLogin({
+      onUrlReady: (url) => {
+        openedUrl = url;
+        process.stderr.write(
+          `\n[unify-mcp] Sign-in page opened in browser:\n  ${url}\n\n`
+        );
       },
-      elicitResultSchema
-    );
-    if (res.action !== "accept" || !res.content) return false;
-    await interactiveLogin(res.content.email, res.content.password);
-    return true;
-  } catch {
-    return false;
+    });
+    return { ok: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const urlHint = openedUrl
+      ? ` If the browser didn't open, visit: ${openedUrl}`
+      : "";
+    return {
+      ok: false,
+      message:
+        `Unify sign-in did not complete (${msg}).${urlHint}` +
+        " You can also run `unify-mcp login` in a terminal, or call the `unify_login` tool.",
+    };
   }
 }
 
@@ -85,10 +72,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
   } catch (err) {
     if (err instanceof CredentialsRequired) {
-      const ok = await promptForCredentials();
-      if (!ok) {
+      const prompt = await promptForCredentials();
+      if (!prompt.ok) {
         return errorResult(
-          "Login required. Either accept the sign-in prompt in Claude, or run `unify-mcp login` in a terminal."
+          prompt.message ??
+            "Unify credentials required. Run `unify-mcp login` or call the `unify_login` tool."
         );
       }
       try {

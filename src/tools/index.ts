@@ -1,4 +1,5 @@
 // Explicit registry — no Object.values spread, no surprises.
+import { unifyLogin, unifyLogout } from "./auth.js";
 import {
   getAudience,
   getAudiencePeopleCount,
@@ -53,6 +54,9 @@ import {
 } from "./workspace.js";
 
 export const tools: ToolDef[] = [
+  // auth
+  unifyLogin,
+  unifyLogout,
   // people
   searchPeople,
   getPerson,

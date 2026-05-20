@@ -2,7 +2,7 @@
 
 Use Claude to query and update your [Unify GTM](https://unifygtm.com) CRM. ~45 tools for people, companies, sequences, audiences, plays, lists, notes, and tasks.
 
-Log in interactively in Claude — no API keys, no admin setup, no env vars. First time you use a Unify tool, Claude shows a sign-in form right in the chat. Token cached locally and auto-refreshes silently for ~30 days.
+Sign in with your Unify account — no API keys, no admin setup, no env vars. The first time a Unify tool runs, `unify-mcp` opens a sign-in page in your default browser, hands the credentials directly to Unify, and caches the result locally. The token auto-refreshes silently for ~30 days, so you sign in once a month.
 
 ## Try these prompts (after install)
 
@@ -16,16 +16,6 @@ Log in interactively in Claude — no API keys, no admin setup, no env vars. Fir
 
 ```bash
 npm install -g unify-mcp
-unify-mcp login
-```
-
-`unify-mcp login` prompts for your Unify email + password. The token is cached at `~/.unify-mcp/token.json` (mode 600).
-
-> **Don't have a Unify password?** If you sign in with Google or another SSO, click **Reset Password** on the [Unify login page](https://app.unifygtm.com), set one, and use it here. SSO and a password can coexist.
-
-Verify:
-```bash
-unify-mcp whoami
 ```
 
 ## Add to Claude Code
@@ -34,7 +24,7 @@ unify-mcp whoami
 claude mcp add unify -- unify-mcp
 ```
 
-That's it. No secrets in Claude config.
+That's it. The first Unify tool you trigger will open a sign-in page in your browser. Submit your Unify email + password, the tab confirms, and the original tool call retries automatically.
 
 ## Add to Claude Desktop
 
@@ -53,35 +43,68 @@ Edit `claude_desktop_config.json`:
 }
 ```
 
-Restart Claude.
+Restart Claude. Same browser-based sign-in on first use.
+
+> **Don't have a Unify password?** If you sign in with Google or another SSO, click **Reset Password** on the [Unify login page](https://app.unifygtm.com), set one, and use it in the form. SSO and a password can coexist.
 
 ## CLI commands
 
 ```bash
-unify-mcp login    # prompt for email/password, cache token
-unify-mcp whoami   # show cached token email + remaining TTL
-unify-mcp logout   # delete cached token
-unify-mcp          # run MCP stdio server (default — used by Claude)
+unify-mcp                    # run MCP stdio server (default — used by Claude)
+unify-mcp login              # terminal-prompt for email/password, cache token
+unify-mcp login --web        # open the browser sign-in page (same flow as in-Claude)
+unify-mcp whoami             # show cached token email + remaining TTL
+unify-mcp logout             # delete cached token + credentials
+unify-mcp serve [--port N]   # run MCP over HTTP with OAuth (see below)
 ```
+
+The cached token + saved credentials live at `~/.unify-mcp/` (mode 600).
+
+## HTTP transport (optional)
+
+For clients that prefer the streamable-HTTP MCP transport with OAuth, run:
+
+```bash
+unify-mcp serve                 # listens on http://127.0.0.1:53274
+unify-mcp serve --port 9000     # custom port
+```
+
+Register with Claude Code:
+
+```bash
+claude mcp add --transport http unify http://127.0.0.1:53274/mcp
+```
+
+The first request triggers the standard OAuth dance — Claude opens the browser, you sign in to Unify, the server mints a bearer token, and subsequent requests carry it. Bearer tokens last 30 days; revoking from the `/mcp` panel also clears the underlying Unify session.
+
+The server is single-user, bound to loopback only. Run it under `launchd`/`systemd` if you want it always-on; otherwise stdio mode is simpler.
 
 ## How auth works
 
-Unify uses Auth0. Auth0's SPA client doesn't issue refresh tokens, so the access token has a 15-minute TTL. To avoid making you log in 96 times a day, this MCP also caches Auth0's session cookies (~30-day lifetime) and uses Auth0's silent re-auth flow (`prompt=none`) under the hood. Result: you log in once, stay logged in for ~30 days, no password prompt.
+Unify uses Auth0. Auth0's SPA client doesn't issue refresh tokens, so the access token has a 15-minute TTL. To avoid making you sign in 96 times a day, `unify-mcp` also caches Auth0's session cookies (~30-day lifetime) and uses Auth0's silent re-auth flow (`prompt=none`) under the hood. Result: sign in once, stay signed in ~30 days, no password prompt.
 
-When the session cookie itself expires, you'll see `"Run unify-mcp login"` — re-run the command, you're done for another month.
+When the session cookie itself expires, the next tool call pops the browser sign-in page again. Submit, done for another month.
+
+The browser sign-in form is served by a one-shot HTTP server `unify-mcp` spins up on `127.0.0.1` (random port, single-use CSRF token in the URL, server self-destructs after a successful submit). Your password goes from the browser → local `unify-mcp` process → `auth.unifygtm.com`. It never touches Claude, Anthropic, or any third party.
+
+## Model-callable auth (fallback)
+
+The server also exposes `unify_login` and `unify_logout` as MCP tools. If the browser flow can't open for some reason (headless container, no GUI), Claude can call `unify_login` with credentials you paste into the chat. Generally not needed — the browser flow is the primary path.
 
 ## Troubleshooting
 
 | Symptom | Fix |
 |---|---|
-| Tool fails with `401` or `"Run unify-mcp login"` mid-conversation | Open a terminal, run `unify-mcp login`. Then `/mcp` in Claude to reconnect (or restart Claude). |
-| `Auth0: invalid password` | Double-check your password at app.unifygtm.com. If you use SSO, click **Reset Password** there, set one, then `unify-mcp login`. |
+| Tool fails with `401` or `"Run unify-mcp login"` mid-conversation | The next tool call will pop the browser sign-in page automatically. If it doesn't, run `unify-mcp login` in a terminal, then `/mcp` in Claude to reconnect. |
+| Browser didn't open | The console prints a `http://127.0.0.1:<port>/login/<token>` URL — open it manually. |
+| `Auth0: invalid password` | Double-check your password at app.unifygtm.com. If you use SSO, click **Reset Password** there, set one, then try again. |
 | `Auth0: MFA required, not supported` | This MCP doesn't support MFA-protected Auth0 logins. Ask your Unify admin to disable MFA for your account, or open an issue. |
-| Just changed your Unify password | `unify-mcp logout && unify-mcp login` |
+| Just changed your Unify password | `unify-mcp logout` and trigger any Unify tool — the sign-in page reopens. |
 | `npm install -g` permission errors | Install Node via `brew install node` (which sets up a user-owned npm prefix), or use `npx unify-mcp` in your Claude config: `{ "command": "npx", "args": ["-y", "--prefer-online", "unify-mcp"] }` |
 
 ## Tool surface
 
+- **Auth**: `unify_login`, `unify_logout`
 - **People**: `search_unify_people`, `get_unify_person`, `list_unify_person_notes`, `list_unify_person_sequence_enrollments`, `list_unify_person_opportunities`, `list_unify_person_exclusions`, `list_unify_person_lists`
 - **Companies**: `search_unify_companies`, `get_unify_company`
 - **Sequences**: list, get definition, get funnel metrics, list enrollments, get per-step execution, check replies, count-for-action (dry run), bulk-unenroll, list background actions
@@ -96,8 +119,7 @@ When the session cookie itself expires, you'll see `"Run unify-mcp login"` — r
 
 ## Privacy
 
-This MCP communicates only between your machine and Unify (`auth.unifygtm.com`, `app-api.unifygtm.com`). No telemetry. Your token never leaves your disk.
-
+This MCP communicates only between your machine and Unify (`auth.unifygtm.com`, `app-api.unifygtm.com`). No telemetry. Your password and token never leave your disk.
 
 ## Not yet supported
 
