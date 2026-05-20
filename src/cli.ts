@@ -2,22 +2,37 @@
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout, stderr } from "node:process";
 import { ENV_LOGIN_PASS, ENV_LOGIN_USER } from "./config.js";
-import { browserLogin } from "./auth/browser-login.js";
 import { clearCredentials } from "./auth/credentials.js";
 import { interactiveLogin } from "./auth/session.js";
 import { clearToken, loadToken } from "./auth/token-cache.js";
 
 async function main() {
   const cmd = process.argv[2];
-  if (cmd === "login") {
-    const useWeb = process.argv.includes("--web");
-    return useWeb ? doWebLogin() : doLogin();
-  }
+  if (cmd === "login") return doLogin();
   if (cmd === "whoami") return doWhoami();
   if (cmd === "logout") return doLogout();
-  if (cmd === "serve") return doServe();
-  // Default: run MCP server over stdio
-  await import("./index.js");
+  if (cmd === "--help" || cmd === "-h" || cmd === "help") return printHelp();
+  if (cmd === "serve" || cmd === undefined) return doServe();
+  stderr.write(`Unknown command: ${cmd}\n`);
+  printHelp();
+  process.exit(1);
+}
+
+function printHelp() {
+  stdout.write(`unify-mcp — MCP server for Unify GTM
+
+Usage:
+  unify-mcp                    Run the HTTP MCP server (default port 53274)
+  unify-mcp serve [--port N]   Same as above; override the port
+  unify-mcp login              Sign in via terminal (email + password)
+  unify-mcp whoami             Show the cached token + remaining TTL
+  unify-mcp logout             Clear the cached token + saved credentials
+
+Register with Claude Code:
+  claude mcp add --transport http unify http://127.0.0.1:53274/mcp
+
+First request opens a browser sign-in page. The cached token lasts ~30 days.
+`);
 }
 
 async function doServe() {
@@ -41,19 +56,6 @@ async function doLogin() {
   rl.close();
   const { expiresIn } = await interactiveLogin(user, pass);
   stdout.write(`✓ Logged in as ${user}\n`);
-  stdout.write(
-    `  Token TTL: ${expiresIn}s. Credentials cached for silent re-auth.\n`
-  );
-}
-
-async function doWebLogin() {
-  stdout.write("Opening sign-in page in your browser...\n");
-  const { email, expiresIn } = await browserLogin({
-    onUrlReady: (url) => {
-      stdout.write(`If it didn't open, visit: ${url}\n`);
-    },
-  });
-  stdout.write(`✓ Logged in as ${email}\n`);
   stdout.write(
     `  Token TTL: ${expiresIn}s. Credentials cached for silent re-auth.\n`
   );
