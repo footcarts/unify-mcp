@@ -38,6 +38,12 @@ export async function startHttpServer(opts: ServeOptions = {}): Promise<void> {
   const host = opts.host ?? "127.0.0.1";
   const issuerUrl = new URL(`http://${host}:${port}`);
 
+  // Fire-and-forget self-update check. If a newer version is on npm, installs
+  // and process.exit()s so launchd / systemd restarts on the new binary.
+  // Throttled to once per 6h. Disable with UNIFY_MCP_DISABLE_AUTOUPDATE=1.
+  const { maybeSelfUpdate } = await import("../updater.js");
+  maybeSelfUpdate();
+
   const provider = new UnifyOAuthProvider();
   const app = express();
 
@@ -196,7 +202,7 @@ export async function startHttpServer(opts: ServeOptions = {}): Promise<void> {
 
 function buildMcpServer(): Server {
   const server = new Server(
-    { name: "unify-mcp", version: "0.6.0" },
+    { name: "unify-mcp", version: "0.6.1" },
     { capabilities: { tools: {} } }
   );
 

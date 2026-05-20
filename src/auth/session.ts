@@ -15,13 +15,30 @@ let inFlight: Promise<string> | null = null;
 /** Returns a fresh access token, transparently refreshing if cached one is expired. */
 export async function getAccessToken(): Promise<string> {
   const cached = await loadToken();
-  if (cached && !isExpired(cached)) return cached.accessToken;
+  // Accept the cached token only if it's both unexpired AND already has the
+  // `org_id` claim Unify's API requires. Older versions of unify-mcp cached
+  // tokens without org_id; those need to be refreshed even though they
+  // technically haven't hit their exp.
+  if (cached && !isExpired(cached) && hasOrgId(cached.accessToken)) {
+    return cached.accessToken;
+  }
 
   if (inFlight) return inFlight;
   inFlight = doRefresh().finally(() => {
     inFlight = null;
   });
   return inFlight;
+}
+
+function hasOrgId(accessToken: string): boolean {
+  try {
+    const payload = JSON.parse(
+      Buffer.from(accessToken.split(".")[1], "base64url").toString()
+    ) as Record<string, unknown>;
+    return typeof payload.org_id === "string" && payload.org_id.length > 0;
+  } catch {
+    return false;
+  }
 }
 
 /** Force a re-auth (e.g. on 401). Dedupes concurrent calls. */
