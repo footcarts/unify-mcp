@@ -196,7 +196,7 @@ export async function startHttpServer(opts: ServeOptions = {}): Promise<void> {
 
 function buildMcpServer(): Server {
   const server = new Server(
-    { name: "unify-mcp", version: "0.5.0" },
+    { name: "unify-mcp", version: "0.6.0" },
     { capabilities: { tools: {} } }
   );
 

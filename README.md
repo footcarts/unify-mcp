@@ -2,9 +2,22 @@
 
 Use Claude to query and update your [Unify GTM](https://unifygtm.com) CRM. ~45 tools for people, companies, sequences, audiences, plays, lists, notes, and tasks.
 
-Sign in with your Unify account — no API keys, no admin setup, no env vars. `unify-mcp` runs as a local HTTP server, Claude connects via OAuth, and the first request opens a browser sign-in page. The token auto-refreshes silently for ~30 days, so you sign in roughly once a month.
+Sign in with your Unify account — no API keys, no admin setup, no env vars.
 
-## Try these prompts (after install)
+## Install
+
+```bash
+npx -y unify-mcp install
+```
+
+That one command:
+- installs `unify-mcp` globally (if not already)
+- sets it up as a background service (`launchd` on macOS, `systemd --user` on Linux)
+- registers it with Claude Code (`claude mcp add --transport http unify http://127.0.0.1:53274/mcp --scope user`)
+
+Open Claude → `/mcp` → click **Authenticate**. Your browser opens, you sign in to Unify, done. Token lasts ~30 days; **Clear authentication** in `/mcp` does a real logout.
+
+## Try these prompts
 
 > "Find people from Acme Corp in Unify and show me their sequence status"
 > "Add the latest 50 new appraisal leads to my 'High Priority' list"
@@ -12,33 +25,19 @@ Sign in with your Unify account — no API keys, no admin setup, no env vars. `u
 > "Anyone who finished the appraisal sequence without replying — pull them up so I can mark dead"
 > "Post a note on this person's Unify record summarizing the call I just had"
 
-## Install
+> **Don't have a Unify password?** If you sign in with Google or another SSO, click **Reset Password** on the [Unify login page](https://app.unifygtm.com), set one, and use it in the form. SSO and a password can coexist.
+
+## Uninstall
 
 ```bash
-npm install -g unify-mcp
+unify-mcp uninstall
 ```
 
-## Run the server
+Stops the service, removes the plist/unit, and unregisters the MCP from Claude.
 
-In a long-lived terminal (or under launchd / systemd — see below):
+## Add to Claude Desktop (manual)
 
-```bash
-unify-mcp
-```
-
-It binds to `http://127.0.0.1:53274` on loopback only. Use `--port N` to override.
-
-## Add to Claude Code
-
-```bash
-claude mcp add --transport http unify http://127.0.0.1:53274/mcp
-```
-
-Open `/mcp` in Claude → you'll see an **Authenticate** button. Click it. Your browser opens to a Unify sign-in form served by the local `unify-mcp` process. Submit your email + password, the tab confirms, Claude is now signed in. Bearer token lasts 30 days. Hit **Clear authentication** in `/mcp` to log out — it wipes both the bearer and the underlying Unify session.
-
-## Add to Claude Desktop
-
-Edit `claude_desktop_config.json`:
+`unify-mcp install` only registers with Claude Code. For Claude Desktop, run the installer first (to get the service running), then edit `claude_desktop_config.json`:
 - macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
 - Windows: `%APPDATA%\Claude\claude_desktop_config.json`
 - Linux: `~/.config/Claude/claude_desktop_config.json`
@@ -53,61 +52,21 @@ Edit `claude_desktop_config.json`:
 }
 ```
 
-Restart Claude. Same OAuth flow on first use.
+Restart Claude.
 
-> **Don't have a Unify password?** If you sign in with Google or another SSO, click **Reset Password** on the [Unify login page](https://app.unifygtm.com), set one, and use it in the form. SSO and a password can coexist.
-
-## Keep the server running
-
-`unify-mcp` is a normal Node process. Pick whichever is easiest:
-
-**macOS — launchd** (`~/Library/LaunchAgents/com.unify-mcp.plist`):
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-  <key>Label</key><string>com.unify-mcp</string>
-  <key>ProgramArguments</key>
-  <array><string>/usr/local/bin/unify-mcp</string></array>
-  <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><true/>
-  <key>StandardOutPath</key><string>/tmp/unify-mcp.log</string>
-  <key>StandardErrorPath</key><string>/tmp/unify-mcp.err</string>
-</dict></plist>
-```
-
-Then `launchctl load ~/Library/LaunchAgents/com.unify-mcp.plist`. Adjust the path to wherever `which unify-mcp` says it lives.
-
-**Linux — systemd user unit** (`~/.config/systemd/user/unify-mcp.service`):
-
-```ini
-[Unit]
-Description=unify-mcp HTTP MCP server
-
-[Service]
-ExecStart=/usr/local/bin/unify-mcp
-Restart=always
-
-[Install]
-WantedBy=default.target
-```
-
-Then `systemctl --user enable --now unify-mcp`.
-
-**Quick & dirty**: just `nohup unify-mcp >/tmp/unify-mcp.log 2>&1 &` and forget it.
-
-## CLI commands
+## CLI reference
 
 ```bash
-unify-mcp                    # run HTTP MCP server (default port 53274)
-unify-mcp serve --port 9000  # custom port
-unify-mcp login              # terminal-prompt for email/password (skip the browser)
+unify-mcp install            # one-command install (service + Claude registration)
+unify-mcp uninstall          # reverse install
+unify-mcp                    # run server in the foreground (port 53274)
+unify-mcp serve --port N     # foreground, custom port
+unify-mcp login              # CLI sign-in (skip the browser)
 unify-mcp whoami             # show cached token email + remaining TTL
-unify-mcp logout             # delete cached token + credentials
+unify-mcp logout             # clear cached token + saved credentials
 ```
 
-The cached token + credentials + OAuth state live at `~/.unify-mcp/` (mode 600).
+The cached token, credentials, and OAuth state live at `~/.unify-mcp/` (mode 600).
 
 ## How auth works
 
@@ -121,13 +80,13 @@ The browser sign-in form is served by `unify-mcp` on `127.0.0.1` (loopback only)
 
 | Symptom | Fix |
 |---|---|
-| `Authenticate` button doesn't show | Make sure you registered with `--transport http` and that `unify-mcp` is running (`curl http://127.0.0.1:53274/healthz` should return `ok`). |
-| Claude can't connect | The server isn't running. Start it with `unify-mcp`. Check `lsof -iTCP:53274 -sTCP:LISTEN`. |
+| `Authenticate` button doesn't show in `/mcp` | Confirm the service is up: `curl http://127.0.0.1:53274/healthz` should return `ok`. If not, `launchctl list \| grep unify-mcp` (macOS) or `systemctl --user status unify-mcp` (Linux). |
+| Claude can't connect | Service isn't running. macOS: `launchctl load ~/Library/LaunchAgents/com.unify-mcp.plist`. Linux: `systemctl --user start unify-mcp`. |
 | `Auth0: invalid password` | Double-check your password at app.unifygtm.com. If you use SSO, click **Reset Password** there, set one, then sign in again. |
 | `Auth0: MFA required, not supported` | This MCP doesn't support MFA-protected Auth0 logins. Ask your Unify admin to disable MFA for your account, or open an issue. |
 | Just changed your Unify password | Click **Clear authentication** in `/mcp`, or `unify-mcp logout`. Next tool call re-runs the OAuth flow. |
-| Port 53274 already taken | Run `unify-mcp --port N` and re-register with the new URL. |
-| `npm install -g` permission errors | Install Node via `brew install node` (which sets up a user-owned npm prefix), or run `npx unify-mcp` instead. |
+| Port 53274 already taken | `unify-mcp install --port N` (then re-register with the new URL). |
+| `npm install -g` permission errors | Install Node via `brew install node` (which sets up a user-owned npm prefix), or use a Node version manager. |
 
 ## Tool surface
 
@@ -153,6 +112,7 @@ This MCP communicates only between your machine and Unify (`auth.unifygtm.com`, 
 - Sending one-off email
 - Opt-out / suppression list edits
 - Sequence pause/resume
+- Windows auto-install (run `unify-mcp` manually + `claude mcp add` for now)
 
 ## Disclaimer
 

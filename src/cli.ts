@@ -8,6 +8,8 @@ import { clearToken, loadToken } from "./auth/token-cache.js";
 
 async function main() {
   const cmd = process.argv[2];
+  if (cmd === "install") return doInstall();
+  if (cmd === "uninstall") return doUninstall();
   if (cmd === "login") return doLogin();
   if (cmd === "whoami") return doWhoami();
   if (cmd === "logout") return doLogout();
@@ -21,30 +23,44 @@ async function main() {
 function printHelp() {
   stdout.write(`unify-mcp — MCP server for Unify GTM
 
-Usage:
-  unify-mcp                    Run the HTTP MCP server (default port 53274)
-  unify-mcp serve [--port N]   Same as above; override the port
-  unify-mcp login              Sign in via terminal (email + password)
-  unify-mcp whoami             Show the cached token + remaining TTL
-  unify-mcp logout             Clear the cached token + saved credentials
+One-command install:
+  npx -y unify-mcp install      Install as a launchd/systemd service +
+                                register with Claude Code (recommended)
 
-Register with Claude Code:
-  claude mcp add --transport http unify http://127.0.0.1:53274/mcp
+Other commands:
+  unify-mcp                     Run the HTTP MCP server in the foreground
+  unify-mcp serve [--port N]    Same as above; override the port
+  unify-mcp uninstall           Stop the service + unregister from Claude
+  unify-mcp login               Sign in via terminal (skip the browser)
+  unify-mcp whoami              Show cached token email + remaining TTL
+  unify-mcp logout              Clear cached token + saved credentials
 
-First request opens a browser sign-in page. The cached token lasts ~30 days.
+After install, open Claude → /mcp → click Authenticate. Token lasts ~30 days.
 `);
 }
 
+async function doInstall() {
+  const port = readPortArg();
+  const { install } = await import("./installer.js");
+  await install(port ? { port } : {});
+}
+
+async function doUninstall() {
+  const { uninstall } = await import("./installer.js");
+  await uninstall();
+}
+
 async function doServe() {
-  const portIdx = process.argv.indexOf("--port");
-  const port =
-    portIdx >= 0 && process.argv[portIdx + 1]
-      ? Number(process.argv[portIdx + 1])
-      : process.env.UNIFY_MCP_PORT
-        ? Number(process.env.UNIFY_MCP_PORT)
-        : undefined;
+  const port = readPortArg();
   const { startHttpServer } = await import("./http/server.js");
-  await startHttpServer({ port });
+  await startHttpServer(port ? { port } : {});
+}
+
+function readPortArg(): number | undefined {
+  const idx = process.argv.indexOf("--port");
+  if (idx >= 0 && process.argv[idx + 1]) return Number(process.argv[idx + 1]);
+  if (process.env.UNIFY_MCP_PORT) return Number(process.env.UNIFY_MCP_PORT);
+  return undefined;
 }
 
 async function doLogin() {
