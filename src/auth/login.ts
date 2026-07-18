@@ -1,5 +1,6 @@
 import axios from "axios";
 import crypto from "node:crypto";
+import { readFileSync, unlinkSync } from "node:fs";
 import { CookieJar } from "tough-cookie";
 import { z } from "zod";
 import {
@@ -11,7 +12,49 @@ import {
 } from "../config.js";
 
 const b64url = (b: Buffer) =>
-  b.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  b
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+
+const FORM_HEADERS = { "content-type": "application/x-www-form-urlencoded" };
+// Hidden browser-capability fields Auth0's New Universal Login forms include.
+// Without them (and `action=default`) the identifier/password POST returns 400.
+const ULP_HIDDEN: Record<string, string> = {
+  captcha: "",
+  "js-available": "true",
+  "webauthn-available": "false",
+  "is-brave": "false",
+  "webauthn-platform-available": "false",
+};
+
+// Path a tenant with adaptive email verification can hand the login an emailed
+// one-time code through. The operator (or a wrapper script) writes the code here.
+const VERIFICATION_CODE_FILE =
+  process.env.UNIFY_VERIFICATION_CODE_FILE ||
+  "/tmp/unify-verification-code.txt";
+
+/** Poll VERIFICATION_CODE_FILE for an emailed one-time code (up to ~150s). */
+async function readVerificationCode(): Promise<string> {
+  try {
+    unlinkSync(VERIFICATION_CODE_FILE);
+  } catch {
+    // not present yet — fine
+  }
+  for (let w = 0; w < 150; w++) {
+    try {
+      const c = readFileSync(VERIFICATION_CODE_FILE, "utf8").trim();
+      if (c) return c;
+    } catch {
+      // still waiting
+    }
+    await new Promise((res) => setTimeout(res, 1000));
+  }
+  throw new Error(
+    `Auth0: email verification code required — write it to ${VERIFICATION_CODE_FILE}`,
+  );
+}
 
 const tokenResponseSchema = z.object({
   access_token: z.string(),
@@ -53,7 +96,7 @@ function buildAuthorizeUrl(
   state: string,
   nonce: string,
   prompt?: string,
-  organization?: string
+  organization?: string,
 ) {
   const params = new URLSearchParams({
     response_type: "code",
@@ -81,13 +124,13 @@ function buildAuthorizeUrl(
  *     automatically.
  */
 function inspectOrgClaim(
-  accessToken: string
+  accessToken: string,
 ):
   | { ok: true }
   | { ok: false; only_org_id?: string; count?: number; reason: string } {
   try {
     const payload = JSON.parse(
-      Buffer.from(accessToken.split(".")[1], "base64url").toString()
+      Buffer.from(accessToken.split(".")[1], "base64url").toString(),
     ) as Record<string, unknown>;
     if (typeof payload.org_id === "string" && payload.org_id.length > 0) {
       return { ok: true };
@@ -96,7 +139,12 @@ function inspectOrgClaim(
       | { count?: number; only_org_id?: string }
       | undefined;
     if (om && om.count === 1 && typeof om.only_org_id === "string") {
-      return { ok: false, only_org_id: om.only_org_id, count: 1, reason: "missing org_id, single org available" };
+      return {
+        ok: false,
+        only_org_id: om.only_org_id,
+        count: 1,
+        reason: "missing org_id, single org available",
+      };
     }
     return {
       ok: false,
@@ -104,7 +152,10 @@ function inspectOrgClaim(
       reason: `token missing org_id claim (org_membership count=${om?.count ?? "?"})`,
     };
   } catch (err) {
-    return { ok: false, reason: `failed to parse token: ${(err as Error).message}` };
+    return {
+      ok: false,
+      reason: `failed to parse token: ${(err as Error).message}`,
+    };
   }
 }
 
@@ -116,14 +167,22 @@ function inspectOrgClaim(
  */
 async function reauthForOrg(
   jar: CookieJar,
-  organization: string
+  organization: string,
 ): Promise<{ accessToken: string; expiresIn: number }> {
   const verifier = b64url(crypto.randomBytes(32));
-  const challenge = b64url(crypto.createHash("sha256").update(verifier).digest());
+  const challenge = b64url(
+    crypto.createHash("sha256").update(verifier).digest(),
+  );
   const sentState = b64url(crypto.randomBytes(16));
   const nonce = b64url(crypto.randomBytes(16));
 
-  let url = buildAuthorizeUrl(challenge, sentState, nonce, "none", organization);
+  let url = buildAuthorizeUrl(
+    challenge,
+    sentState,
+    nonce,
+    "none",
+    organization,
+  );
   let code = "";
   let returnedState = "";
   for (let i = 0; i < 10; i++) {
@@ -135,7 +194,7 @@ async function reauthForOrg(
         const err = u.searchParams.get("error");
         if (err) {
           throw new Error(
-            `Auth0 organization re-auth failed: ${err} (${u.searchParams.get("error_description") ?? ""})`
+            `Auth0 organization re-auth failed: ${err} (${u.searchParams.get("error_description") ?? ""})`,
           );
         }
         code = u.searchParams.get("code") ?? "";
@@ -147,7 +206,7 @@ async function reauthForOrg(
       continue;
     }
     throw new Error(
-      `Auth0 organization re-auth: unexpected status ${r.status} (last URL ${url})`
+      `Auth0 organization re-auth: unexpected status ${r.status} (last URL ${url})`,
     );
   }
   if (!code) throw new Error("Auth0 organization re-auth: no code");
@@ -157,7 +216,14 @@ async function reauthForOrg(
   return await exchangeCode(code, verifier);
 }
 
-async function exchangeCode(code: string, verifier: string): Promise<LoginResult["accessToken"] extends string ? { accessToken: string; expiresIn: number } : never> {
+async function exchangeCode(
+  code: string,
+  verifier: string,
+): Promise<
+  LoginResult["accessToken"] extends string
+    ? { accessToken: string; expiresIn: number }
+    : never
+> {
   const r = await axios({
     method: "POST",
     url: `https://${AUTH0_DOMAIN}/oauth/token`,
@@ -177,14 +243,17 @@ async function exchangeCode(code: string, verifier: string): Promise<LoginResult
         ? (r.data as { error?: unknown }).error
         : undefined;
     throw new Error(
-      `Auth0 token exchange failed (status ${r.status}${err ? `, error=${String(err)}` : ""})`
+      `Auth0 token exchange failed (status ${r.status}${err ? `, error=${String(err)}` : ""})`,
     );
   }
   const parsed = tokenResponseSchema.safeParse(r.data);
   if (!parsed.success) {
     throw new Error(`Auth0 token exchange returned unexpected shape`);
   }
-  return { accessToken: parsed.data.access_token, expiresIn: parsed.data.expires_in };
+  return {
+    accessToken: parsed.data.access_token,
+    expiresIn: parsed.data.expires_in,
+  };
 }
 
 /**
@@ -194,11 +263,13 @@ async function exchangeCode(code: string, verifier: string): Promise<LoginResult
  */
 export async function loginWithPassword(
   username: string,
-  password: string
+  password: string,
 ): Promise<LoginResult> {
   const jar = new CookieJar();
   const verifier = b64url(crypto.randomBytes(32));
-  const challenge = b64url(crypto.createHash("sha256").update(verifier).digest());
+  const challenge = b64url(
+    crypto.createHash("sha256").update(verifier).digest(),
+  );
   const sentState = b64url(crypto.randomBytes(16));
   const nonce = b64url(crypto.randomBytes(16));
 
@@ -214,44 +285,108 @@ export async function loginWithPassword(
       }
       continue;
     }
-    throw new Error(`Auth0 /authorize: unexpected status ${r.status} (last URL ${url})`);
+    throw new Error(
+      `Auth0 /authorize: unexpected status ${r.status} (last URL ${url})`,
+    );
   }
-  if (!stateParam) throw new Error("Auth0 /authorize: did not reach login page");
+  if (!stateParam)
+    throw new Error("Auth0 /authorize: did not reach login page");
 
-  await jarReq(jar, `https://${AUTH0_DOMAIN}/u/login/identifier`, {
-    method: "POST",
-    body: new URLSearchParams({ state: stateParam, username }).toString(),
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-  });
+  // Auth0's New Universal Login is identifier-first, requires `action=default`
+  // plus a set of hidden browser-capability fields on each form (POSTing only
+  // {state, username} yields a 400), and rotates `state` after each screen. So
+  // rather than hardcode identifier→password with a fixed state, follow whatever
+  // screen Auth0 actually serves and post the form it expects, reading the fresh
+  // `state` from the current URL each hop. Some tenants also insert an emailed
+  // one-time verification screen; we surface a code file for it.
+  const bare = (u: string) => u.split("?")[0];
+  const idBody = (st: string) =>
+    new URLSearchParams({
+      state: st,
+      username,
+      action: "default",
+      ...ULP_HIDDEN,
+    }).toString();
+  const pwBody = (st: string) =>
+    new URLSearchParams({
+      state: st,
+      username,
+      password,
+      action: "default",
+      ...ULP_HIDDEN,
+    }).toString();
+  const codeBody = (st: string, c: string) =>
+    new URLSearchParams({ state: st, code: c, action: "default" }).toString();
 
-  url = `https://${AUTH0_DOMAIN}/u/login/password`;
+  url = `https://${AUTH0_DOMAIN}/u/login/identifier`;
   let opts: RequestInit = {
     method: "POST",
-    body: new URLSearchParams({ state: stateParam, username, password }).toString(),
-    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: idBody(stateParam),
+    headers: FORM_HEADERS,
   };
   let code = "";
   let returnedState = "";
-  for (let i = 0; i < 12; i++) {
+  let postedPassword = false;
+  for (let i = 0; i < 24; i++) {
     const r = await jarReq(jar, url, opts);
     if (r.status >= 300 && r.status < 400 && r.headers.location) {
       const next = new URL(r.headers.location, url).toString();
       if (next.startsWith(AUTH0_REDIRECT_URI)) {
-        code = new URL(next).searchParams.get("code") ?? "";
-        returnedState = new URL(next).searchParams.get("state") ?? "";
+        const u = new URL(next);
+        if (u.searchParams.get("error")) {
+          throw new Error(
+            `Auth0 login: ${u.searchParams.get("error")} (${u.searchParams.get("error_description") ?? ""})`,
+          );
+        }
+        code = u.searchParams.get("code") ?? "";
+        returnedState = u.searchParams.get("state") ?? "";
         if (code) break;
       }
       url = next;
       opts = { method: "GET" };
       continue;
     }
-    if (r.status === 200 && url.includes("/u/login/password")) {
-      throw new Error("Auth0: invalid password (or stale session — try `unify-mcp login` again)");
+    if (r.status === 200) {
+      const screenState = new URL(url).searchParams.get("state") ?? stateParam;
+      const path = bare(url);
+      if (path.endsWith("/u/login/password") && !postedPassword) {
+        postedPassword = true;
+        opts = {
+          method: "POST",
+          body: pwBody(screenState),
+          headers: FORM_HEADERS,
+        };
+        continue;
+      }
+      if (path.endsWith("/u/login-email-verification")) {
+        const vCode = await readVerificationCode();
+        opts = {
+          method: "POST",
+          body: codeBody(screenState, vCode),
+          headers: FORM_HEADERS,
+        };
+        continue;
+      }
+      if (path.endsWith("/u/login/identifier")) {
+        opts = {
+          method: "POST",
+          body: idBody(screenState),
+          headers: FORM_HEADERS,
+        };
+        continue;
+      }
+      if (path.endsWith("/u/login/password") && postedPassword) {
+        throw new Error(
+          "Auth0: invalid password (or stale session — try `unify-mcp login` again)",
+        );
+      }
+      if (path.includes("/u/mfa")) {
+        throw new Error("Auth0: MFA required, not supported by this client");
+      }
     }
-    if (r.status === 200 && url.includes("/u/mfa")) {
-      throw new Error("Auth0: MFA required, not supported by this client");
-    }
-    throw new Error(`Auth0 password POST: unexpected status ${r.status} (last URL ${url})`);
+    throw new Error(
+      `Auth0 login flow: unexpected status ${r.status} (last URL ${url})`,
+    );
   }
   if (!code) throw new Error("Auth0: did not receive authorization code");
   if (returnedState !== sentState) {
@@ -279,7 +414,7 @@ export async function loginWithPassword(
             : inspect.count && inspect.count > 1
               ? `(user is in ${inspect.count} orgs; multi-org selection not yet supported — set UNIFY_ORG_ID to pick one)`
               : `(${inspect.reason})`
-        }`
+        }`,
       );
     }
   }
@@ -297,14 +432,22 @@ export async function loginWithPassword(
  */
 export async function silentReauth(
   jar: CookieJar,
-  organization?: string
+  organization?: string,
 ): Promise<{ accessToken: string; expiresIn: number } | null> {
   const verifier = b64url(crypto.randomBytes(32));
-  const challenge = b64url(crypto.createHash("sha256").update(verifier).digest());
+  const challenge = b64url(
+    crypto.createHash("sha256").update(verifier).digest(),
+  );
   const sentState = b64url(crypto.randomBytes(16));
   const nonce = b64url(crypto.randomBytes(16));
 
-  let url = buildAuthorizeUrl(challenge, sentState, nonce, "none", organization);
+  let url = buildAuthorizeUrl(
+    challenge,
+    sentState,
+    nonce,
+    "none",
+    organization,
+  );
   let code = "";
   let returnedState = "";
   for (let i = 0; i < 10; i++) {

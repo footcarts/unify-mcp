@@ -33,7 +33,7 @@ export async function getAccessToken(): Promise<string> {
 function hasOrgId(accessToken: string): boolean {
   try {
     const payload = JSON.parse(
-      Buffer.from(accessToken.split(".")[1], "base64url").toString()
+      Buffer.from(accessToken.split(".")[1], "base64url").toString(),
     ) as Record<string, unknown>;
     return typeof payload.org_id === "string" && payload.org_id.length > 0;
   } catch {
@@ -99,7 +99,10 @@ async function doFullLogin(): Promise<string> {
   if (!user || !pass) {
     throw new CredentialsRequired();
   }
-  const { accessToken, expiresIn, cookieJar } = await loginWithPassword(user, pass);
+  const { accessToken, expiresIn, cookieJar } = await loginWithPassword(
+    user,
+    pass,
+  );
   const next: CachedToken = {
     accessToken,
     expiresAt: Date.now() + expiresIn * 1000,
@@ -117,9 +120,23 @@ async function doFullLogin(): Promise<string> {
  */
 export async function interactiveLogin(
   user: string,
-  pass: string
+  pass: string,
 ): Promise<{ email: string; expiresIn: number }> {
-  const { accessToken, expiresIn, cookieJar } = await loginWithPassword(user, pass);
+  // Escape hatch for tenants whose Auth0 login is captcha-gated (Arkose/hCaptcha),
+  // where headless password login cannot complete. If a valid, org-scoped token
+  // was injected out of band — copied from a logged-in browser session into
+  // ~/.unify-mcp/token.json — accept it and skip the password flow entirely.
+  const pre = await loadToken();
+  if (pre && !isExpired(pre) && hasOrgId(pre.accessToken)) {
+    return {
+      email: pre.email || user,
+      expiresIn: Math.max(60, Math.floor((pre.expiresAt - Date.now()) / 1000)),
+    };
+  }
+  const { accessToken, expiresIn, cookieJar } = await loginWithPassword(
+    user,
+    pass,
+  );
   const next: CachedToken = {
     accessToken,
     expiresAt: Date.now() + expiresIn * 1000,
